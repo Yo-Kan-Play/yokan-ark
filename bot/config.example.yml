@@ -1,0 +1,115 @@
+# yokan-ark Discord Bot config example
+# - Copy this file to ./bot/config.yaml
+# - Put secrets (R2 keys, Discord token, RCON password) into environment variables, not in git.
+
+# --- Discord ---
+discord:
+  # Slash commands are accepted only in these channels.
+  command_channel_ids:
+    - 123456789012345678
+
+  # Bot sends notifications (start/stop/backup/errors) to this channel.
+  notify_channel_id: 234567890123456789
+
+# --- Permissions ---
+permissions:
+  # Fallback rules (used when command-specific allow_user_ids is not provided)
+  default:
+    allow_role_ids:
+      - 111111111111111111
+
+  # Command-specific rules
+  commands:
+    start:
+      allow_user_ids: [123456789012345678]
+    stop:
+      allow_user_ids: [123456789012345678]
+    save:
+      allow_user_ids: [123456789012345678]
+    backup:
+      allow_user_ids: [123456789012345678]
+    scan:
+      allow_user_ids: [123456789012345678]
+
+    # status / players / maps are often safe to open by role or everyone.
+    status:
+      allow_user_ids: []
+    players:
+      allow_user_ids: []
+    maps:
+      allow_user_ids: []
+
+# --- Runtime ---
+runtime:
+  max_running_maps: 2
+  scan_interval_minutes: 15
+  idle_stop_minutes: 30
+  save_wait_seconds: 10
+
+# --- Podman control ---
+podman:
+  # Rootless podman socket path inside bot container.
+  # Bot container should mount this socket.
+  socket_path: /run/podman/podman.sock
+
+  # Server image built from this repo.
+  server_image: yokan-ark-maps:latest
+
+  # Host path for persistence (single mount). Bot uses this to create directories.
+  persist_host_path: /srv/yokan-ark/persist
+
+# --- Server defaults (same for all maps) ---
+server_defaults:
+  cluster_id: yokan-ark
+  max_players: 10
+
+  # Optional: extra params appended to ASA_START_PARAMS
+  # extra_asa_start_params: "-WinLiveMaxPlayers=10"
+
+# --- Backups ---
+backup:
+  local:
+    interval_minutes: 120
+    keep_generations: 3
+    run_on_stop: true
+
+  cloud:
+    provider: cloudflare_r2
+    schedule_hhmm: "01:00"
+    keep_days: 2
+
+    # R2 config is usually read from bot container env:
+    # - R2_ENDPOINT
+    # - R2_ACCESS_KEY_ID
+    # - R2_SECRET_ACCESS_KEY
+    # - R2_BUCKET
+
+# --- Map list ---
+# Only per-map values should be: map_id / session_name / port.
+#
+# Port policy:
+# - Use 10-step game ports to reduce collision risk when multiple maps run at once:
+#   7777 -> 7787 -> 7797 ...
+#
+# Derived ports (no per-map config needed):
+# - RCON port: port + 19243  (7777 -> 27020)
+# - Query port: port + 1     (optional)
+
+maps:
+  - map_id: TheCenter_WP
+    display_name: The Center
+    session_name: Yokan Ark The Center
+    port: 7777
+    backup_enabled: true
+
+  - map_id: ScorchedEarth_WP
+    display_name: Scorched Earth
+    session_name: Yokan Ark Scorched Earth
+    port: 7787
+    backup_enabled: true
+
+  - map_id: Island_WP
+    display_name: The Island
+    session_name: Yokan Ark The Island
+    port: 7797
+    backup_enabled: true

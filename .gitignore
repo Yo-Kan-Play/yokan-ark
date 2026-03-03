@@ -1,0 +1,27 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local configs (secrets)
+bot/config.yaml
+bot/config.yml
+
+# Local persistence / backups (DO NOT commit)
+persist/
+data/
+backups/
+*.tar
+*.tar.gz
+*.log
+
+# Temporary
+*.tmp
+*~
