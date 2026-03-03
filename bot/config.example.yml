@@ -30,6 +30,8 @@ permissions:
       allow_user_ids: [123456789012345678]
     scan:
       allow_user_ids: [123456789012345678]
+    broadcast:
+      allow_user_ids: [123456789012345678]
 
     # status / players / maps are often safe to open by role or everyone.
     status:
@@ -45,12 +47,15 @@ runtime:
   scan_interval_minutes: 15
   idle_stop_minutes: 30
   save_wait_seconds: 10
+  rcon_timeout_seconds: 5
+  podman_timeout_seconds: 20
+  presence_interval_seconds: 120
 
 # --- Podman control ---
 podman:
   # Rootless podman socket path inside bot container.
   # Bot container should mount this socket.
-  socket_path: /run/podman/podman.sock
+  socket_path: /run/user/1000/podman/podman.sock
 
   # Server image built from this repo.
   server_image: yokan-ark-maps:latest
@@ -58,10 +63,20 @@ podman:
   # Host path for persistence (single mount). Bot uses this to create directories.
   persist_host_path: /srv/yokan-ark/persist
 
+  container_name_prefix: yokan-ark-
+
+  create_defaults:
+    timezone_mount: true
+    publish_query_port: true
+
 # --- Server defaults (same for all maps) ---
 server_defaults:
   cluster_id: yokan-ark
   max_players: 10
+  rcon_password_env: ARK_RCON_PASSWORD
+  rcon_host: 127.0.0.1
+  rcon_port_offset: 19243
+  query_port_offset: 1
 
   # Optional: extra params appended to ASA_START_PARAMS
   # extra_asa_start_params: "-WinLiveMaxPlayers=10"
@@ -69,14 +84,41 @@ server_defaults:
 # --- Backups ---
 backup:
   local:
+    enabled: true
     interval_minutes: 120
     keep_generations: 3
     run_on_stop: true
+    out_dir: /srv/yokan-ark/backups/local
 
   cloud:
+    enabled: true
     provider: cloudflare_r2
     schedule_hhmm: "01:00"
     keep_days: 2
+    bucket: yokan-ark-backups
+    prefix: yokan-ark
+
+announcements:
+  enabled: true
+  items:
+    - name: pre_shutdown_warning_10m
+      time: "01:50"
+      weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+      message: "サーバーは10分後に停止します。作業中の人は安全な場所へ移動してください。"
+      include_maps: []
+    - name: pre_shutdown_warning_1m
+      time: "01:59"
+      message: "サーバーはまもなく停止します。ログアウトしてください。"
+      include_maps: []
+
+pre_shutdown:
+  enabled: true
+  time: "01:55"
+  action: graceful_stop_all
+
+shutdown_guard:
+  enabled: true
+  best_effort: true
 
     # R2 config is usually read from bot container env:
     # - R2_ENDPOINT
@@ -101,15 +143,18 @@ maps:
     session_name: Yokan Ark The Center
     port: 7777
     backup_enabled: true
+    publish_query_port: true
 
   - map_id: ScorchedEarth_WP
     display_name: Scorched Earth
     session_name: Yokan Ark Scorched Earth
     port: 7787
     backup_enabled: true
+    publish_query_port: true
 
-  - map_id: Island_WP
-    display_name: The Island
-    session_name: Yokan Ark The Island
+  - map_id: Aberration_WP
+    display_name: Aberration
+    session_name: Yokan Ark Aberration
     port: 7797
     backup_enabled: true
+    publish_query_port: false

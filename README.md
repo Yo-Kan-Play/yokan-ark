@@ -11,7 +11,7 @@ Ubuntu Server 上の rootless Podman で、ARK: Survival Ascended (ASA) Dedicate
 - `yokan-ark/maps/`  
   ASA サーバー用イメージと entrypoint を置きます。
 - `yokan-ark/bot/`  
-  Discord Bot 用コンテナの雛形を置きます。Bot のソースコードは含みません。
+  Discord Bot (Go) の実装とコンテナ定義を置きます。
 - `yokan-ark/shared/`  
   全マップ共通の設定テンプレートを置きます。
 - `yokan-ark/scripts/`  
@@ -49,7 +49,7 @@ sudo chown -R "$USER:$USER" /srv/yokan-ark/persist
 
 ```bash
 ./scripts/create-map-container.sh TheCenter_WP "Yokan Ark The Center" 7777 yokan-ark-maps:latest /srv/yokan-ark/persist
-./scripts/create-map-container.sh ScorchedEarth_WP "Yokan Ark Scorched Earth" 7787 yokan-ark-maps:latest /srv/yokan-ark/persist
+./scripts/create-map-container.sh ScorchedEarth_WP "Yokan Ark Scorched Earth" 7787 yokan-ark-maps:latest /srv/yokan-ark/persist false
 ```
 
 4) 起動と停止を実行します。
@@ -72,6 +72,38 @@ sudo chown -R "$USER:$USER" /srv/yokan-ark/persist
 - Bot の entrypoint は `bot/entrypoint.sh` にあります。
 - Bot の設定例は `bot/config.example.yml` にあります。
 - Bot の設定ファイルは `bot/config.yaml` を想定します（git 管理しません）。
+
+## Discord Bot の実行（Podman）
+
+1) rootless Podman socket を有効化します。
+
+```bash
+./scripts/enable-rootless-podman-socket.sh
+```
+
+2) Bot 設定を作成します。
+
+```bash
+cp bot/config.example.yml bot/config.yaml
+```
+
+3) `bot/config.yaml` の `podman.socket_path` を実行環境に合わせます。
+   例: `/run/user/1000/podman/podman.sock`
+
+4) Bot コンテナを起動します。
+
+```bash
+podman run --rm --name yokan-ark-bot \
+  -e DISCORD_TOKEN=xxxxxxxx \
+  -e ARK_RCON_PASSWORD=xxxxxxxx \
+  -e R2_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com \
+  -e R2_ACCESS_KEY_ID=xxxxxxxx \
+  -e R2_SECRET_ACCESS_KEY=xxxxxxxx \
+  -v "$PWD/bot/config.yaml:/config/config.yaml:ro" \
+  -v "/run/user/$(id -u)/podman/podman.sock:/run/user/$(id -u)/podman/podman.sock" \
+  -v "/srv/yokan-ark/backups/local:/srv/yokan-ark/backups/local:rw" \
+  yokan-ark-bot:latest
+```
 
 ## ドキュメント
 

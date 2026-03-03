@@ -11,8 +11,8 @@
 - 永続化マウントを全マップで 1 本に統一します。
 - 全マップ共通の INI 設定を 1 箇所で管理します。
 - Discord Bot が Podman socket 経由でコンテナを起動停止できる前提で構成します。
-  - Bot のソースコードは含みません。
-  - Bot の Dockerfile と entrypoint と設定例は含みます。
+  - Bot の実装は `bot/` 配下に含みます。
+  - Bot は Go で実装し、Podman socket を直接利用します。
 
 ## コンポーネント
 
@@ -47,12 +47,19 @@ maps entrypoint は起動時に次を行います。
 - クラスタ共有: `/persist/cluster-shared/`
 - マップごとの永続領域: `/persist/maps/<MAP_ID>/`
 
-### 4) bot: Discord Bot コンテナ雛形
+### 4) bot: Discord Bot コンテナ
 
 - 位置: `bot/`
 - Dockerfile: `bot/Dockerfile`
 - entrypoint: `bot/entrypoint.sh`
 - 設定例: `bot/config.example.yml`
+
+Bot は次を担当します。
+
+- Discord スラッシュコマンド受付（`/ark start|stop|status|save|backup|scan|players|maps|broadcast`）
+- Podman socket 経由で map コンテナの create/start/stop/inspect/stats
+- RCON 経由で `saveworld` / `ListPlayers` / `ServerChat`
+- 無人停止、定期バックアップ、自動アナウンス、pre_shutdown
 
 Bot は Podman socket をマウントしてコンテナを制御する前提です。
 Bot の要求仕様は `docs/spec/01_bot_spec.md` にまとめます。

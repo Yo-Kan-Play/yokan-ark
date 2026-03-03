@@ -12,9 +12,6 @@ cp -f "./shared/ini/WindowsServer/GameUserSettings.ini" "${PERSIST_HOST_PATH}/co
 
 if [[ -f "./shared/ini/WindowsServer/Game.ini" ]]; then
   cp -f "./shared/ini/WindowsServer/Game.ini" "${PERSIST_HOST_PATH}/common/ini/WindowsServer/Game.ini"
-else
-  # Keep an example for reference
-  cp -f "./shared/ini/WindowsServer/Game.ini.example" "${PERSIST_HOST_PATH}/common/ini/WindowsServer/Game.ini.example"
 fi
 
 echo "Prepared persist directory: ${PERSIST_HOST_PATH}"
