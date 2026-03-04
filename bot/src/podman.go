@@ -150,10 +150,14 @@ func (p *PodmanClient) CreateContainer(ctx context.Context, m MapConfig) error {
 		"PORT=" + strconv.Itoa(m.Port),
 		"CLUSTER_ID=" + p.cfg.Server.ClusterID,
 		"MAX_PLAYERS=" + strconv.Itoa(p.cfg.Server.MaxPlayers),
+		"COMMON_INI_DIR=/shared/ini/WindowsServer",
 	}
 
 	hostCfg := map[string]any{
-		"Binds": []string{p.cfg.Podman.PersistHostPath + ":/persist:rw,U"},
+		"Binds": []string{
+			p.cfg.Podman.PersistHostPath + ":/persist:rw,U",
+			p.cfg.Podman.SharedINIHostPath + ":/shared/ini/WindowsServer:ro",
+		},
 		"Memory": int64(memoryLimitGB) * 1024 * 1024 * 1024,
 		"PortBindings": map[string][]map[string]string{
 			fmt.Sprintf("%d/udp", m.Port): {{"HostPort": strconv.Itoa(m.Port)}},
@@ -192,7 +196,11 @@ func (p *PodmanClient) CreateContainer(ctx context.Context, m MapConfig) error {
 	}
 	if resp.StatusCode >= 300 {
 		buf, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("create失敗: %s: %s", resp.Status, string(buf))
+		errText := string(buf)
+		if strings.Contains(strings.ToLower(errText), "permission denied") || strings.Contains(strings.ToLower(errText), "mountpoint") {
+			return fmt.Errorf("create失敗: %s: %s (persist_host_path=%s, shared_ini_host_path=%s)", resp.Status, errText, p.cfg.Podman.PersistHostPath, p.cfg.Podman.SharedINIHostPath)
+		}
+		return fmt.Errorf("create失敗: %s: %s", resp.Status, errText)
 	}
 	return nil
 }

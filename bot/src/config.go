@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -51,6 +52,7 @@ type PodmanConfig struct {
 	SocketPath          string `yaml:"socket_path"`
 	ServerImage         string `yaml:"server_image"`
 	PersistHostPath     string `yaml:"persist_host_path"`
+	SharedINIHostPath   string `yaml:"shared_ini_host_path"`
 	PersistContainerPath string `yaml:"persist_container_path"`
 	ContainerNamePrefix string `yaml:"container_name_prefix"`
 	CreateDefaults      struct {
@@ -120,11 +122,21 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(buf, cfg); err != nil {
 		return nil, fmt.Errorf("config解析失敗: %w", err)
 	}
+	applyEnvOverrides(cfg)
 	applyDefaults(cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("YOKAN_PERSIST_HOST_PATH"); v != "" {
+		cfg.Podman.PersistHostPath = v
+	}
+	if v := os.Getenv("YOKAN_SHARED_INI_HOST_PATH"); v != "" {
+		cfg.Podman.SharedINIHostPath = v
+	}
 }
 
 func applyDefaults(cfg *Config) {
@@ -157,6 +169,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Podman.PersistContainerPath == "" {
 		cfg.Podman.PersistContainerPath = cfg.Podman.PersistHostPath
+	}
+	if cfg.Podman.SharedINIHostPath == "" {
+		cfg.Podman.SharedINIHostPath = filepath.Join(filepath.Dir(cfg.Podman.PersistHostPath), "shared", "ini", "WindowsServer")
 	}
 	if cfg.Server.MaxPlayers <= 0 {
 		cfg.Server.MaxPlayers = 10

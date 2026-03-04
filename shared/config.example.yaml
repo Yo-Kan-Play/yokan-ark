@@ -70,6 +70,10 @@ podman:
   # Host path for persistence (single mount). Bot uses this to create directories.
   persist_host_path: /srv/yokan-ark/persist
 
+  # Host path of common INI directory mounted read-only into map containers.
+  # If empty, bot derives it as dirname(persist_host_path)/shared/ini/WindowsServer.
+  shared_ini_host_path: /srv/yokan-ark/shared/ini/WindowsServer
+
   # Persist path visible from inside bot container.
   # If you mount host persist to different container path (e.g. /persist), set it here.
   persist_container_path: /srv/yokan-ark/persist

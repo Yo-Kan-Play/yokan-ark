@@ -17,6 +17,7 @@ die() {
 
 # --- Common env (same across maps; optional overrides) ---
 PERSIST_ROOT="${PERSIST_ROOT:-/persist}"
+COMMON_INI_DIR="${COMMON_INI_DIR:-/shared/ini/WindowsServer}"
 CLUSTER_ID="${CLUSTER_ID:-yokan-ark}"
 MAX_PLAYERS="${MAX_PLAYERS:-10}"
 ENABLE_DEBUG="${ENABLE_DEBUG:-0}"
@@ -31,7 +32,6 @@ QUERY_PORT=$((PORT + 1))
 
 # Persistent layout (single mount: /persist)
 MAP_ROOT="${PERSIST_ROOT}/maps/${MAP_ID}"
-COMMON_INI_DIR="${PERSIST_ROOT}/common/ini/WindowsServer"
 
 # Internal fixed paths used by base image
 SERVER_FILES="/home/gameserver/server-files"
@@ -66,26 +66,26 @@ ln -s "${CLUSTER_DIR}" "${CLUSTER_LINK}"
 # --- Apply common INI templates (copy into map-local config) ---
 # Target path that ARK reads by default:
 #   /home/gameserver/server-files/ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini
-# We keep a common template in:
-#   /persist/common/ini/WindowsServer/GameUserSettings.ini
-# and copy it into each map before start.
+# We keep common templates in a read-only bind mount:
+#   /shared/ini/WindowsServer/*.ini
+# and copy them into each map before start.
 
 INI_DST_DIR="${SERVER_FILES}/ShooterGame/Saved/Config/WindowsServer"
 INI_DST_GUS="${INI_DST_DIR}/GameUserSettings.ini"
 
 mkdir -p "${INI_DST_DIR}"
 
-if [[ -f "${COMMON_INI_DIR}/GameUserSettings.ini" ]]; then
-  cp -f "${COMMON_INI_DIR}/GameUserSettings.ini" "${INI_DST_GUS}"
+shopt -s nullglob
+common_ini_files=("${COMMON_INI_DIR}"/*.ini)
+if (( ${#common_ini_files[@]} > 0 )); then
+  for src in "${common_ini_files[@]}"; do
+    cp -f "${src}" "${INI_DST_DIR}/$(basename "${src}")"
+  done
 else
-  log "Common GameUserSettings.ini not found at ${COMMON_INI_DIR}/GameUserSettings.ini"
+  log "Common INI files not found at ${COMMON_INI_DIR}/*.ini"
   log "Continuing without template copy."
 fi
-
-# If Game.ini exists, copy it too (optional)
-if [[ -f "${COMMON_INI_DIR}/Game.ini" ]]; then
-  cp -f "${COMMON_INI_DIR}/Game.ini" "${INI_DST_DIR}/Game.ini"
-fi
+shopt -u nullglob
 
 # --- Minimal per-map overrides to avoid collisions ---
 # We override RCONPort in GameUserSettings.ini if present.

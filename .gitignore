@@ -13,6 +13,8 @@ venv/
 # Local configs (secrets)
 shared/config.yaml
 shared/.env
+shared/ini/WindowsServer/*.ini
+!shared/ini/WindowsServer/*.example.ini
 
 # Local persistence / backups (DO NOT commit)
 persist/

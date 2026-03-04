@@ -771,9 +771,9 @@ func (b *Bot) updatePresence(ctx context.Context) error {
 			players += len(list)
 		}
 	}
-	activity := "ARK 0/" + fmt.Sprintf("%d | Idle", b.cfg.Runtime.MaxRunningMaps)
+	activity := "誰もいません;w;"
 	if running > 0 {
-		activity = fmt.Sprintf("ARK %d/%d | Players %d", running, b.cfg.Runtime.MaxRunningMaps, players)
+		activity = fmt.Sprintf("%d マップ稼働中 | %d 人プレイ中", running, players)
 	}
 	return b.dg.UpdateCustomStatus(activity)
 }

@@ -1,6 +1,9 @@
 # yokan-ark
 
+[English](README.en.md)
+
 Ubuntu Server 上の rootless Podman で、ARK: Survival Ascended (ASA) Dedicated Server を運用するためのリポジトリです。
+DiscordBot を通して複数マップを管理することができます。
 
 このリポジトリは compose を使いません。
 このリポジトリは「1マップ = 1コンテナ」で運用します。
@@ -66,9 +69,9 @@ sudo chown -R "$USER:$USER" ./persist
 ## 共通 INI の管理
 
 - 共通テンプレートは `shared/ini/WindowsServer/` に置きます。
-- `scripts/setup-persist.sh` がホスト側の `./persist/common/ini/WindowsServer/` にコピーします。
-- `maps/entrypoint.sh` が起動時に共通 INI を各マップへコピーします。
-- `maps/entrypoint.sh` が起動時に `RCONPort` をマップごとに上書きします。
+- マップコンテナ作成時に `shared/ini/WindowsServer` を read-only で `/shared/ini/WindowsServer` にマウントします。
+- `maps/entrypoint.sh` は起動時に `/shared/ini/WindowsServer/*.ini` を各マップへコピーします（INI追加にも自動対応）。
+- `maps/entrypoint.sh` は起動時に `GameUserSettings.ini` の `RCONPort` だけをマップごとに上書きします。
 
 ## Discord Bot の雛形
 
@@ -96,6 +99,7 @@ cp shared/config.example.yaml shared/config.yaml
 
   併せて次も確認してください。
   - `podman.persist_container_path`: Botコンテナ内から見える persist のパス
+  - `podman.shared_ini_host_path`: mapコンテナに read-only マウントする共通INIのホストパス
   - `server_defaults.rcon_host`: コンテナ運用では `host.containers.internal` を推奨
   - 開発時に反映を速くしたい場合は `discord.command_guild_id` にテスト用 Guild ID を設定
 
