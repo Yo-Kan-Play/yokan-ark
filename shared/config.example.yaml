@@ -1,30 +1,30 @@
-# yokan-ark Discord Bot config example
-# - Copy this file to ./bot/config.yaml
-# - Put secrets (R2 keys, Discord token, RCON password) into environment variables, not in git.
+# yokan-ark Discord Bot 設定例
+# - このファイルを ./bot/config.yaml にコピーしてください
+# - シークレット（R2キー、Discordトークン、RCONパスワード）は環境変数に入れ、git に含めないでください。
 
 # --- Discord ---
 discord:
-  # Slash commands are accepted only in these channels.
+  # スラッシュコマンドは以下のチャンネルのみ受け付けます。
   command_channel_ids:
     - 123456789012345678
 
-  # Bot sends notifications (start/stop/backup/errors) to this channel.
+  # ボットはこのチャンネルに通知（起動/停止/バックアップ/エラー）を送信します。
   notify_channel_id: 234567890123456789
 
-  # Optional (development): register slash commands to a specific guild for fast reflection.
-  # Empty means global registration.
+  # 任意（開発用）：スラッシュコマンドを特定のギルドに登録すると変更が早く反映されます。
+  # 空の場合はグローバル登録になります。
   command_guild_id: ""
 
 # --- Permissions ---
 permissions:
-  # Fallback role rules (used only when command-specific rule is not defined)
+  # フォールバックのロールルール（コマンドごとのルールが未定義の場合に使用）
   default:
     allow_role_ids:
       - 111111111111111111
 
-  # Command-specific rules
-  # - If allow_user_ids contains one or more entries: only those users may execute
-  # - If allow_user_ids is an empty array: anyone may execute
+  # コマンドごとのルール
+  # - allow_user_ids に1つ以上のエントリがある場合：そのユーザーのみ実行可能
+  # - allow_user_ids が空配列の場合：誰でも実行可能
   commands:
     start:
       allow_user_ids: [123456789012345678]
@@ -38,8 +38,6 @@ permissions:
       allow_user_ids: [123456789012345678]
     config-reload:
       allow_user_ids: [123456789012345678]
-
-    # status / players / maps are often safe to open by role or everyone.
     status:
       allow_user_ids: []
     players:
@@ -47,7 +45,7 @@ permissions:
     maps:
       allow_user_ids: []
 
-# --- Runtime ---
+# --- ランタイム設定 ---
 runtime:
   max_running_maps: 2
   scan_interval_minutes: 15
@@ -58,24 +56,24 @@ runtime:
   presence_interval_seconds: 120
   shutdown_timeout_seconds: 90
 
-# --- Podman control ---
+# --- Podman 制御 ---
 podman:
-  # Rootless podman socket path inside bot container.
-  # Bot container should mount this socket.
+  # ボットコンテナ内の rootless podman ソケットパス。
+  # ボットコンテナはこのソケットをマウントする必要があります。
   socket_path: /run/user/1000/podman/podman.sock
 
-  # Server image built from this repo.
+  # このリポジトリからビルドされるサーバーイメージ。
   server_image: yokan-ark-maps:latest
 
-  # Host path for persistence (single mount). Bot uses this to create directories.
+  # 永続データ用のホスト側パス（単一マウント）。ボットはこのパスを使ってディレクトリを作成します。
   persist_host_path: /srv/yokan-ark/persist
 
-  # Host path of common INI directory mounted read-only into map containers.
-  # If empty, bot derives it as dirname(persist_host_path)/shared/ini/WindowsServer.
+  # マップコンテナに読み取り専用でマウントされる共通 INI ディレクトリのホスト側パス。
+  # 空の場合、bot は dirname(persist_host_path)/shared/ini/WindowsServer を使用して推測します。
   shared_ini_host_path: /srv/yokan-ark/shared/ini/WindowsServer
 
-  # Persist path visible from inside bot container.
-  # If you mount host persist to different container path (e.g. /persist), set it here.
+  # ボットコンテナ内から見える永続パス。
+  # ホストの persist をコンテナ内の別パス（例：/persist）にマウントしている場合はここを設定してください。
   persist_container_path: /srv/yokan-ark/persist
 
   container_name_prefix: yokan-ark-
@@ -84,7 +82,7 @@ podman:
     timezone_mount: true
     publish_query_port: true
 
-# --- Server defaults (same for all maps) ---
+# --- サーバーのデフォルト（全マップ共通） ---
 server_defaults:
   cluster_id: yokan-ark
   max_players: 10
@@ -94,10 +92,10 @@ server_defaults:
   rcon_port_offset: 19243
   query_port_offset: 1
 
-  # Optional: extra params appended to ASA_START_PARAMS
+  # 任意：ASA_START_PARAMS に追加で付与されるパラメータ
   # extra_asa_start_params: "-WinLiveMaxPlayers=10"
 
-# --- Backups ---
+# --- バックアップ設定 ---
 backup:
   local:
     enabled: true
@@ -127,29 +125,28 @@ announcements:
       message: "定期アナウンスです。"
       include_maps: []
 
-    # R2 config is usually read from bot container env:
+    # R2 の設定は通常ボットコンテナの環境変数から読み取られます：
     # - R2_ENDPOINT
     # - R2_ACCESS_KEY_ID
     # - R2_SECRET_ACCESS_KEY
     # - R2_BUCKET
 
-# --- Map list ---
-# Only per-map values should be: map_id / session_name / port.
+# --- マップ一覧 ---
+# マップごとに設定すべき値は map_id / session_name / port のみです。
 #
-# Port policy:
-# - Use 10-step game ports to reduce collision risk when multiple maps run at once:
+# ポート方針：
+# - 複数マップを同時に動かす際の衝突リスクを下げるため、10刻みのゲームポートを使います：
 #   7777 -> 7787 -> 7797 ...
 #
-# Derived ports (no per-map config needed):
-# - RCON port: port + 19243  (7777 -> 27020)
-# - Query port: port + 1     (optional)
+# 派生ポート（マップ側で設定不要）：
+# - RCON ポート: port + 19243  (7777 -> 27020)
+# - Query ポート: port + 1     （任意）
 
 maps:
   - map_id: TheCenter_WP
     display_name: The Center
     session_name: Yokan Ark The Center
     port: 7777
-    # Optional per-map override (GB)
     # memory_limit_gb: 24
     backup_enabled: true
     publish_query_port: true
