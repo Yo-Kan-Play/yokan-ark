@@ -73,7 +73,7 @@ sudo chown -R "$USER:$USER" ./persist
 - `maps/entrypoint.sh` は起動時に `/shared/ini/WindowsServer/*.ini` を各マップへコピーします（INI追加にも自動対応）。
 - `maps/entrypoint.sh` は起動時に `GameUserSettings.ini` の `RCONPort` だけをマップごとに上書きします。
 
-## Discord Bot の雛形
+## Discord Bot
 
 - Bot の Dockerfile は `bot/Dockerfile` にあります。
 - Bot の entrypoint は `bot/entrypoint.sh` にあります。

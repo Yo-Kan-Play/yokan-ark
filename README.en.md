@@ -72,7 +72,7 @@ sudo chown -R "$USER:$USER" ./persist
 - `maps/entrypoint.sh` copies `/shared/ini/WindowsServer/*.ini` to each map at startup (it automatically handles added INI files).
 - `maps/entrypoint.sh` overwrites only the `RCONPort` in `GameUserSettings.ini` per map at startup.
 
-## Discord Bot skeleton
+## Discord Bot
 
 - Bot Dockerfile: `bot/Dockerfile`
 - Bot entrypoint: `bot/entrypoint.sh`
