@@ -56,7 +56,7 @@ maps entrypoint は起動時に次を行います。
 
 Bot は次を担当します。
 
-- Discord スラッシュコマンド受付（`/ark start|stop|status|save|backup|scan|players|maps|broadcast`）
+- Discord スラッシュコマンド受付（`/ark start|stop|status|save|backup|scan|players|maps`）
 - Podman socket 経由で map コンテナの create/start/stop/inspect/stats
 - RCON 経由で `saveworld` / `ListPlayers` / `ServerChat`
 - 無人停止、定期バックアップ、自動アナウンス、pre_shutdown

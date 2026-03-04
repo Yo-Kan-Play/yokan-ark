@@ -8,7 +8,6 @@ Bot は **Podman socket** 経由で ARK マップコンテナを制御する。
 - Discord のスラッシュコマンドで ARK マップを起動・停止・監視する。
 - 無人時の自動停止を行う。
 - ローカルバックアップとクラウドバックアップを行う。
-- 起動中サーバーへ一斉メッセージ送信（broadcast）を行う。
 - 指定時刻に自動メッセージ送信（announcements）を行う。
 - 可能ならシャットダウン時に安全停止を試みる（best effort）。
 
@@ -24,7 +23,7 @@ Bot は **Podman socket** 経由で ARK マップコンテナを制御する。
 - **マップ**: ARK(ASA) の 1 サーバーインスタンス。`map_id` で識別する。
 - **マップコンテナ**: 1マップ=1コンテナ。停止状態で用意され、Bot が起動する。
 - **Podman socket**: Podman API を叩く Unix socket。例: `/run/user/<uid>/podman/podman.sock`
-- **RCON**: サーバー管理用のリモートコンソール。人数取得、save、broadcast に使う。
+- **RCON**: サーバー管理用のリモートコンソール。人数取得、save に使う。
 - **コマンド受付チャンネル**: Bot がコマンドを受け付ける Discord チャンネル。
 - **通知チャンネル**: 起動・停止・バックアップなどの通知を送る Discord チャンネル。
 
@@ -35,7 +34,7 @@ Bot は **Podman socket** 経由で ARK マップコンテナを制御する。
 - マップコンテナは「停止状態のコンテナ」として存在する前提とする。
 - Bot は config.yaml を正として、必要ならコンテナを create する（停止状態）。
 - Bot は Podman socket 経由で `start/stop/inspect/stats` を行う。
-- Bot は RCON で人数取得、saveworld、broadcast を行う。
+- Bot は RCON で人数取得、saveworld を行う。
 
 ---
 
@@ -94,7 +93,6 @@ permissions:
     save:      { allow_user_ids: [123456789012345678] }
     backup:    { allow_user_ids: [123456789012345678] }
     scan:      { allow_user_ids: [123456789012345678] }
-    broadcast: { allow_user_ids: [123456789012345678] }
     status:    { allow_user_ids: [] }
     players:   { allow_user_ids: [] }
     maps:      { allow_user_ids: [] }
@@ -228,7 +226,7 @@ maps:
 ### 6-2. 既定挙動（安全寄り）
 
 * `status / maps / players` は許可してよい。
-* `start / stop / save / backup / scan / broadcast` は拒否する。
+* `start / stop / save / backup / scan` は拒否する。
 
 ### 6-3. 拒否時レスポンス（日本語）
 
@@ -322,31 +320,6 @@ maps:
 
 * config.yaml に登録されたマップ一覧と状態を表示する
 
-### 8-9. /ark broadcast <msg>
-
-#### 目的
-
-* 起動中の全マップに対して、サーバー内チャットへメッセージを送信する。
-* 送信は RCON 経由で行う。
-
-#### 対象マップ
-
-* 既定は「起動中の全マップ」。
-* 起動中マップが 0 の場合は送信せず、日本語で理由を返す。
-
-#### 権限
-
-* `permissions.commands.broadcast` を使用する。
-
-#### 成功時レスポンス（日本語）
-
-* `起動中の全マップにメッセージを送信しました（対象: Nマップ）`
-
-#### 失敗時レスポンス（日本語）
-
-* `メッセージ送信に失敗しました（失敗: <map_id>）`
-* 失敗マップがある場合はマップ単位で列挙する。
-
 ---
 
 ## 9. 自動停止（15分スキャン）
@@ -394,7 +367,7 @@ maps:
 
 ### 12-1. 目的
 
-* `/ark broadcast` と同等の送信を、YAML で指定した時刻に自動実行する。
+* YAML で指定した時刻に自動実行する。
 * Ubuntu Server が 02:00 に停止する前に警告メッセージを送れるようにする。
 
 ### 12-2. スケジュール形式
@@ -403,78 +376,22 @@ maps:
 * 曜日指定は任意とする。
 * 複数設定を許可する。
 
-### 12-3. 対象マップ
-
-* 既定は「起動中の全マップ」。
-* `include_maps` を指定した場合は、その集合のうち起動中だけを対象にする。
-
-### 12-4. 実行ログ
+### 12-3. 実行ログ
 
 * 自動メッセージ実行の成否を通知チャンネルへ送る。
-* 失敗はマップ単位で列挙する。
 
 ---
 
-## 13. pre_shutdown（確実性の高い停止）
+## 13. Podman 操作要件
 
-### 13-1. 目的
-
-* OS 停止が確定している運用（例: 毎日 02:00）に対して、事前に安全停止を実行する。
-
-### 13-2. 挙動
-
-* `pre_shutdown.time` に `pre_shutdown.action` を実行する。
-* `graceful_stop_all` の場合は次を行う。
-
-  * 起動中の全マップへ `saveworld`
-  * `save_wait_seconds` 待機
-  * 起動中の全マップを stop
-  * `backup.local.run_on_stop` に従いローカルバックアップ
-
-### 13-3. 通知
-
-* 実行開始と完了を通知チャンネルへ送る。
-* 失敗時は失敗マップを列挙する。
-
----
-
-## 14. シャットダウンブロック（任意・best effort）
-
-### 14-1. 目的
-
-* ホスト OS がシャットダウンしようとしたタイミングで、可能なら「保存→停止」を完了するまでシャットダウンを保留する。
-
-### 14-2. 仕様上の扱い
-
-* シャットダウン保留は「できる場合がある」。
-* 権限・systemd 設定・シャットダウン方法に依存する。
-* 本機能は `best_effort` とし、失敗しても通常の停止処理にフォールバックする。
-
-### 14-3. 実装方針（推奨）
-
-* Bot が SIGTERM を受けた際に、次を行う。
-
-  * 起動中の全マップへ `saveworld`
-  * `save_wait_seconds` 待機
-  * 起動中の全マップを stop
-  * `run_on_stop` が true ならローカルバックアップ
-* 追加で可能なら systemd inhibitor（delay）を取得する。
-
-  * `shutdown_guard.enabled: true` の場合のみ試行する。
-  * inhibitor 取得に失敗した場合はログに残し、SIGTERM ハンドリングのみ行う。
-
----
-
-## 15. Podman 操作要件
-
-### 15-1. 必須操作
+### 13-1. 必須操作
 
 * `podman start <container>`
 * `podman stop <container>`
 * `podman inspect <container>`
 * `podman stats --no-stream <container>`
 
-### 15-2. create（任意）
+### 13-2. create（任意）
 
 * Bot がコンテナ create を担当する場合、次を満たす。
 
@@ -490,7 +407,7 @@ maps:
 
 ---
 
-## 16. 競合と排他（重要）
+## 14. 競合と排他（重要）
 
 * 同一マップに対する操作（start/stop/save/backup/broadcast）は同時実行しない。
 * `backup` と `stop` は同一マップで排他する。
@@ -498,7 +415,7 @@ maps:
 
 ---
 
-## 17. エラー処理方針
+## 15. エラー処理方針
 
 * 部分失敗は許容する。
 * 失敗はマップ単位で列挙する。
@@ -507,7 +424,7 @@ maps:
 
 ---
 
-## 18. ログ・通知方針
+## 16. ログ・通知方針
 
 * 重要イベントは通知チャンネルへ送る。
 * 詳細ログはコンテナ標準出力へ出す。
@@ -515,7 +432,7 @@ maps:
 
 ---
 
-## 19. セキュリティ注意
+## 17. セキュリティ注意
 
 * Podman socket のマウントは強い権限を与える。
 * Bot コマンドは allowlist 運用を推奨する。

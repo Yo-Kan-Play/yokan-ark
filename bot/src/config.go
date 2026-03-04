@@ -17,8 +17,6 @@ type Config struct {
 	Server       ServerDefaults     `yaml:"server_defaults"`
 	Backup       BackupConfig       `yaml:"backup"`
 	Announcements AnnouncementConfig `yaml:"announcements"`
-	PreShutdown  PreShutdownConfig  `yaml:"pre_shutdown"`
-	ShutdownGuard ShutdownGuardConfig `yaml:"shutdown_guard"`
 	Maps         []MapConfig        `yaml:"maps"`
 }
 
@@ -46,6 +44,7 @@ type RuntimeConfig struct {
 	RCONTimeoutSeconds  int `yaml:"rcon_timeout_seconds"`
 	PodmanTimeoutSeconds int `yaml:"podman_timeout_seconds"`
 	PresenceIntervalSeconds int `yaml:"presence_interval_seconds"`
+	ShutdownTimeoutSeconds int `yaml:"shutdown_timeout_seconds"`
 }
 
 type PodmanConfig struct {
@@ -101,17 +100,6 @@ type AnnouncementItem struct {
 	IncludeMaps []string `yaml:"include_maps"`
 }
 
-type PreShutdownConfig struct {
-	Enabled bool `yaml:"enabled"`
-	Time    string `yaml:"time"`
-	Action  string `yaml:"action"`
-}
-
-type ShutdownGuardConfig struct {
-	Enabled    bool `yaml:"enabled"`
-	BestEffort bool `yaml:"best_effort"`
-}
-
 type MapConfig struct {
 	MapID            string `yaml:"map_id"`
 	DisplayName      string `yaml:"display_name"`
@@ -160,6 +148,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Runtime.PresenceIntervalSeconds <= 0 {
 		cfg.Runtime.PresenceIntervalSeconds = 120
+	}
+	if cfg.Runtime.ShutdownTimeoutSeconds <= 0 {
+		cfg.Runtime.ShutdownTimeoutSeconds = 90
 	}
 	if cfg.Podman.ContainerNamePrefix == "" {
 		cfg.Podman.ContainerNamePrefix = "yokan-ark-"
@@ -231,11 +222,6 @@ func (c *Config) Validate() error {
 		}
 		if _, err := time.Parse("15:04", c.Backup.Cloud.ScheduleHHMM); err != nil {
 			return fmt.Errorf("backup.cloud.schedule_hhmm は HH:MM 形式: %w", err)
-		}
-	}
-	if c.PreShutdown.Enabled && c.PreShutdown.Time != "" {
-		if _, err := time.Parse("15:04", c.PreShutdown.Time); err != nil {
-			return fmt.Errorf("pre_shutdown.time は HH:MM 形式: %w", err)
 		}
 	}
 	return nil

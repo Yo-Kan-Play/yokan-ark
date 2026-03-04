@@ -25,6 +25,7 @@ Ubuntu Server 上の rootless Podman で、ARK: Survival Ascended (ASA) Dedicate
 - RCON ポートは `PORT + 19243` で導出します。例: 7777 -> 27020
 - クエリポートは `PORT + 1` で導出します。必要な場合だけ公開します。
 - rootless Podman 運用では `:Z` を使いません。
+- rootless Podman 運用では persist マウントに `:U` を付けます。
 
 ## クイックスタート（手動）
 
@@ -39,17 +40,17 @@ cd yokan-ark
 2) 永続ディレクトリを作成します。
 
 ```bash
-sudo mkdir -p /srv/yokan-ark/persist
-sudo chown -R "$USER:$USER" /srv/yokan-ark/persist
+sudo mkdir -p persist
+sudo chown -R "$USER:$USER" ./persist
 
-./scripts/setup-persist.sh /srv/yokan-ark/persist
+./scripts/setup-persist.sh ./persist
 ```
 
 3) マップコンテナを「停止状態」で作成します。
 
 ```bash
-./scripts/create-map-container.sh TheCenter_WP "Yokan Ark The Center" 7777 yokan-ark-maps:latest /srv/yokan-ark/persist
-./scripts/create-map-container.sh ScorchedEarth_WP "Yokan Ark Scorched Earth" 7787 yokan-ark-maps:latest /srv/yokan-ark/persist false
+./scripts/create-map-container.sh TheCenter_WP "Yokan Ark The Center" 7777 yokan-ark-maps:latest ./persist true rw,U yokan-ark
+./scripts/create-map-container.sh ScorchedEarth_WP "Yokan Ark Scorched Earth" 7787 yokan-ark-maps:latest ./persist false rw,U yokan-ark
 ```
 
 4) 起動と停止を実行します。
@@ -57,12 +58,15 @@ sudo chown -R "$USER:$USER" /srv/yokan-ark/persist
 ```bash
 ./scripts/start-map.sh TheCenter_WP
 ./scripts/stop-map.sh  TheCenter_WP
+
+# 既存コンテナが権限エラーで起動しない場合は再作成
+./scripts/create-map-container.sh TheCenter_WP "Yokan Ark The Center" 7777 yokan-ark-maps:latest ./persist true rw,U yokan-ark
 ```
 
 ## 共通 INI の管理
 
 - 共通テンプレートは `shared/ini/WindowsServer/` に置きます。
-- `scripts/setup-persist.sh` がホスト側の `/srv/yokan-ark/persist/common/ini/WindowsServer/` にコピーします。
+- `scripts/setup-persist.sh` がホスト側の `./persist/common/ini/WindowsServer/` にコピーします。
 - `maps/entrypoint.sh` が起動時に共通 INI を各マップへコピーします。
 - `maps/entrypoint.sh` が起動時に `RCONPort` をマップごとに上書きします。
 
@@ -70,8 +74,8 @@ sudo chown -R "$USER:$USER" /srv/yokan-ark/persist
 
 - Bot の Dockerfile は `bot/Dockerfile` にあります。
 - Bot の entrypoint は `bot/entrypoint.sh` にあります。
-- Bot の設定例は `bot/config.example.yml` にあります。
-- Bot の設定ファイルは `bot/config.yaml` を想定します（git 管理しません）。
+- Bot の設定例は `shared/config.example.yaml` にあります。
+- Bot の設定ファイルは `shared/config.yaml` を想定します（git 管理しません）。
 
 ## Discord Bot の実行（Podman）
 
@@ -84,10 +88,10 @@ sudo chown -R "$USER:$USER" /srv/yokan-ark/persist
 2) Bot 設定を作成します。
 
 ```bash
-cp bot/config.example.yml bot/config.yaml
+cp shared/config.example.yaml shared/config.yaml
 ```
 
-3) `bot/config.yaml` の `podman.socket_path` を実行環境に合わせます。
+3) `shared/config.yaml` の `podman.socket_path` を実行環境に合わせます。
    例: `/run/user/1000/podman/podman.sock`
 
   併せて次も確認してください。
@@ -104,10 +108,10 @@ podman run --rm --name yokan-ark-bot \
   -e R2_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com \
   -e R2_ACCESS_KEY_ID=xxxxxxxx \
   -e R2_SECRET_ACCESS_KEY=xxxxxxxx \
-  -v "$PWD/bot/config.yaml:/config/config.yaml:ro" \
+  -v "$PWD/shared/config.yaml:/config/config.yaml:ro" \
   -v "/run/user/$(id -u)/podman/podman.sock:/run/user/$(id -u)/podman/podman.sock" \
-  -v "/srv/yokan-ark/persist:/srv/yokan-ark/persist:ro" \
-  -v "/srv/yokan-ark/backups/local:/srv/yokan-ark/backups/local:rw" \
+  -v "./persist:./persist:ro" \
+  -v "./backups/local:./backups/local:rw" \
   yokan-ark-bot:latest
 ```
 

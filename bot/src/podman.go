@@ -27,6 +27,7 @@ type PodmanContainerState struct {
 	Running  bool
 	Status   string
 	StartedAt time.Time
+	ClusterID string
 }
 
 type MapStatus struct {
@@ -108,6 +109,9 @@ func (p *PodmanClient) InspectState(ctx context.Context, mapID string) (PodmanCo
 			Status    string `json:"Status"`
 			StartedAt string `json:"StartedAt"`
 		} `json:"State"`
+		Config struct {
+			Env []string `json:"Env"`
+		} `json:"Config"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return PodmanContainerState{}, err
@@ -117,7 +121,14 @@ func (p *PodmanClient) InspectState(ctx context.Context, mapID string) (PodmanCo
 		t, _ := time.Parse(time.RFC3339Nano, payload.State.StartedAt)
 		startedAt = t
 	}
-	return PodmanContainerState{Exists: true, Running: payload.State.Running, Status: payload.State.Status, StartedAt: startedAt}, nil
+	clusterID := ""
+	for _, env := range payload.Config.Env {
+		if strings.HasPrefix(env, "CLUSTER_ID=") {
+			clusterID = strings.TrimPrefix(env, "CLUSTER_ID=")
+			break
+		}
+	}
+	return PodmanContainerState{Exists: true, Running: payload.State.Running, Status: payload.State.Status, StartedAt: startedAt, ClusterID: clusterID}, nil
 }
 
 func (p *PodmanClient) CreateContainer(ctx context.Context, m MapConfig) error {
@@ -142,7 +153,7 @@ func (p *PodmanClient) CreateContainer(ctx context.Context, m MapConfig) error {
 	}
 
 	hostCfg := map[string]any{
-		"Binds": []string{p.cfg.Podman.PersistHostPath + ":/persist:rw"},
+		"Binds": []string{p.cfg.Podman.PersistHostPath + ":/persist:rw,U"},
 		"Memory": int64(memoryLimitGB) * 1024 * 1024 * 1024,
 		"PortBindings": map[string][]map[string]string{
 			fmt.Sprintf("%d/udp", m.Port): {{"HostPort": strconv.Itoa(m.Port)}},
@@ -214,6 +225,23 @@ func (p *PodmanClient) Stop(ctx context.Context, mapID string) error {
 	return nil
 }
 
+func (p *PodmanClient) Remove(ctx context.Context, mapID string) error {
+	name := containerName(p.cfg, mapID)
+	resp, err := p.request(ctx, http.MethodDelete, "/containers/"+url.PathEscape(name)+"?force=true", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode >= 300 {
+		buf, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("remove失敗: %s: %s", resp.Status, string(buf))
+	}
+	return nil
+}
+
 func (p *PodmanClient) StatsMemory(ctx context.Context, mapID string) (uint64, error) {
 	name := containerName(p.cfg, mapID)
 	resp, err := p.request(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/stats?stream=false", nil)
@@ -261,15 +289,24 @@ func (p *PodmanClient) RunningCount(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	count := 0
+	mapIDSet := map[string]struct{}{}
+	for _, m := range p.cfg.Maps {
+		mapIDSet[m.MapID] = struct{}{}
+	}
 	for _, c := range arr {
 		if c.State != "running" {
 			continue
 		}
 		for _, n := range c.Names {
-			if strings.TrimPrefix(n, "/") == "" {
+			name := strings.TrimPrefix(n, "/")
+			if name == "" {
 				continue
 			}
-			if strings.HasPrefix(strings.TrimPrefix(n, "/"), p.cfg.Podman.ContainerNamePrefix) {
+			if !strings.HasPrefix(name, p.cfg.Podman.ContainerNamePrefix) {
+				continue
+			}
+			mapID := strings.TrimPrefix(name, p.cfg.Podman.ContainerNamePrefix)
+			if _, ok := mapIDSet[mapID]; ok {
 				count++
 				break
 			}

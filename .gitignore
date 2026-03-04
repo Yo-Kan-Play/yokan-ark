@@ -11,8 +11,8 @@ __pycache__/
 venv/
 
 # Local configs (secrets)
-bot/config.yaml
-bot/config.yml
+shared/config.yaml
+shared/.env
 
 # Local persistence / backups (DO NOT commit)
 persist/

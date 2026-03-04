@@ -16,6 +16,7 @@ import (
 )
 
 type Bot struct {
+	configPath string
 	cfg      *Config
 	log      *ActionLogger
 	dg       *discordgo.Session
@@ -25,6 +26,7 @@ type Bot struct {
 	mapByID  map[string]MapConfig
 
 	mu              sync.Mutex
+	scanMu          sync.Mutex
 	mapLocks        map[string]*sync.Mutex
 	zeroSince       map[string]time.Time
 	startedAt       map[string]time.Time
@@ -33,7 +35,7 @@ type Bot struct {
 	scanQueue       chan string
 }
 
-func NewBot(cfg *Config, logger *ActionLogger) (*Bot, error) {
+func NewBot(cfg *Config, configPath string, logger *ActionLogger) (*Bot, error) {
 	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
 	if token == "" {
 		return nil, fmt.Errorf("DISCORD_TOKEN が未設定です")
@@ -44,6 +46,7 @@ func NewBot(cfg *Config, logger *ActionLogger) (*Bot, error) {
 	}
 	dg.Identify.Intents = discordgo.IntentsGuilds
 	b := &Bot{
+		configPath:      configPath,
 		cfg:            cfg,
 		log:            logger,
 		dg:             dg,
@@ -96,6 +99,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 	b.restoreRuntimeState(ctx)
 	b.log.Info("Discord Bot 起動完了")
+	b.notify("Yo-Kan サーバーが起動しました")
 	go b.runScanWorker(ctx)
 	go b.runSchedulers(ctx)
 
@@ -105,19 +109,22 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		b.log.Warn("コンテキストキャンセル受信。安全停止を開始します")
 	case sig := <-sigCh:
 		b.log.Warn("シグナル受信: %s", sig.String())
-		if b.cfg.ShutdownGuard.Enabled && b.cfg.ShutdownGuard.BestEffort {
-			_ = b.gracefulStopAll(context.Background(), "shutdown_guard")
-		}
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(b.cfg.Runtime.ShutdownTimeoutSeconds)*time.Second)
+	defer cancel()
+	if err := b.gracefulShutdown(shutdownCtx); err != nil {
+		return err
 	}
 	return nil
 }
 
 func (b *Bot) onReady(s *discordgo.Session, r *discordgo.Ready) {
 	b.log.Info("Discord接続: %s", r.User.Username)
-	_ = s.UpdateCustomStatus("ARK Bot 準備完了")
+	_ = s.UpdateCustomStatus("ARK サーバー準備完了")
 }
 
 func (b *Bot) registerCommands() error {
@@ -131,9 +138,9 @@ func (b *Bot) registerCommands() error {
 			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "save", Description: "全起動マップ保存"},
 			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "backup", Description: "全起動マップバックアップ"},
 			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "scan", Description: "無人監視を即時実行"},
+			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "config-reload", Description: "config.yaml を再読み込み"},
 			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "players", Description: "プレイヤー一覧", Options: []*discordgo.ApplicationCommandOption{{Type: discordgo.ApplicationCommandOptionString, Name: "map", Description: "map_id", Required: false}}},
 			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "maps", Description: "マップ一覧"},
-			{Type: discordgo.ApplicationCommandOptionSubCommand, Name: "broadcast", Description: "全起動マップへ送信", Options: []*discordgo.ApplicationCommandOption{{Type: discordgo.ApplicationCommandOptionString, Name: "msg", Description: "メッセージ", Required: true}}},
 		},
 	}
 	guildID := strings.TrimSpace(b.cfg.Discord.CommandGuildID)
@@ -160,6 +167,9 @@ func (b *Bot) permissionAllowed(member *discordgo.Member, userID, command string
 		}
 		return false
 	}
+	if ok {
+		return true
+	}
 	if len(b.cfg.Permissions.Default.AllowRoleIDs) > 0 && member != nil {
 		for _, rid := range member.Roles {
 			for _, allowed := range b.cfg.Permissions.Default.AllowRoleIDs {
@@ -168,9 +178,9 @@ func (b *Bot) permissionAllowed(member *discordgo.Member, userID, command string
 				}
 			}
 		}
+		return false
 	}
-	safe := map[string]bool{"status": true, "maps": true, "players": true}
-	return safe[command]
+	return true
 }
 
 func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -191,7 +201,13 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 	}
 	sub := opts[0]
 	cmd := sub.Name
-	if !b.permissionAllowed(i.Member, i.Member.User.ID, cmd) {
+	userID := ""
+	if i.Member != nil && i.Member.User != nil {
+		userID = i.Member.User.ID
+	} else if i.User != nil {
+		userID = i.User.ID
+	}
+	if !b.permissionAllowed(i.Member, userID, cmd) {
 		b.reply(i, "このコマンドを実行する権限がありません")
 		return
 	}
@@ -217,6 +233,8 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 		message, err = b.cmdBackup(ctx)
 	case "scan":
 		message, err = b.cmdScan(ctx)
+	case "config-reload":
+		message, err = b.cmdConfigReload(ctx)
 	case "players":
 		mapID := ""
 		if len(sub.Options) > 0 {
@@ -225,8 +243,6 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 		message, err = b.cmdPlayers(ctx, mapID)
 	case "maps":
 		message, err = b.cmdMaps(ctx)
-	case "broadcast":
-		message, err = b.cmdBroadcast(ctx, sub.Options[0].StringValue())
 	default:
 		message = "未対応コマンドです"
 	}
@@ -240,6 +256,7 @@ func (b *Bot) onInteractionCreate(s *discordgo.Session, i *discordgo.Interaction
 func (b *Bot) deferReply(i *discordgo.InteractionCreate) bool {
 	err := b.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral},
 	})
 	if err == nil {
 		return true
@@ -262,13 +279,6 @@ func (b *Bot) listPlayersLocked(ctx context.Context, m MapConfig) ([]string, err
 	return b.rcon.ListPlayers(ctx, m)
 }
 
-func (b *Bot) broadcastLocked(ctx context.Context, m MapConfig, msg string) error {
-	lock := b.mapLock(m.MapID)
-	lock.Lock()
-	defer lock.Unlock()
-	return b.rcon.Broadcast(ctx, m, msg)
-}
-
 func (b *Bot) enqueueScan(reason string) bool {
 	select {
 	case b.scanQueue <- reason:
@@ -281,7 +291,7 @@ func (b *Bot) enqueueScan(reason string) bool {
 func (b *Bot) reply(i *discordgo.InteractionCreate, msg string) {
 	_ = b.dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Content: msg},
+		Data: &discordgo.InteractionResponseData{Content: msg, Flags: discordgo.MessageFlagsEphemeral},
 	})
 }
 
@@ -324,7 +334,17 @@ func (b *Bot) cmdStart(ctx context.Context, mapID string) (string, error) {
 	if state.Running {
 		return fmt.Sprintf("すでに起動しています: %s", m.DisplayName), nil
 	}
-	if !state.Exists && runningCount >= b.cfg.Runtime.MaxRunningMaps {
+	if state.Exists && !state.Running && strings.TrimSpace(state.ClusterID) != strings.TrimSpace(b.cfg.Server.ClusterID) {
+		if err := b.podman.Remove(ctx, mapID); err != nil {
+			return "", err
+		}
+		if err := b.podman.CreateContainer(ctx, m); err != nil {
+			b.log.Action(mapID, "create", "failed", started)
+			return fmt.Sprintf("マップの起動に失敗しました: %s", m.DisplayName), err
+		}
+		state.Exists = true
+	}
+	if !state.Running && runningCount >= b.cfg.Runtime.MaxRunningMaps {
 		return fmt.Sprintf("同時起動上限(%d)のため起動できません", b.cfg.Runtime.MaxRunningMaps), nil
 	}
 	if !state.Exists {
@@ -333,13 +353,7 @@ func (b *Bot) cmdStart(ctx context.Context, mapID string) (string, error) {
 			return fmt.Sprintf("マップの起動に失敗しました: %s", m.DisplayName), err
 		}
 	}
-	if !state.Exists && runningCount >= b.cfg.Runtime.MaxRunningMaps {
-		return fmt.Sprintf("同時起動上限(%d)のため起動できません", b.cfg.Runtime.MaxRunningMaps), nil
-	}
 	if !state.Running {
-		if runningCount >= b.cfg.Runtime.MaxRunningMaps {
-			return fmt.Sprintf("同時起動上限(%d)のため起動できません", b.cfg.Runtime.MaxRunningMaps), nil
-		}
 		if err := b.podman.Start(ctx, mapID); err != nil {
 			b.log.Action(mapID, "start", "failed", started)
 			b.notify("起動失敗: " + m.DisplayName)
@@ -471,11 +485,95 @@ func (b *Bot) cmdBackup(ctx context.Context) (string, error) {
 }
 
 func (b *Bot) cmdScan(ctx context.Context) (string, error) {
-	_ = ctx
-	if b.enqueueScan("manual") {
-		return "無人監視スキャンをキュー投入しました", nil
+	result, err := b.scanIdleOnce(ctx, "manual")
+	if err != nil {
+		return "無人監視スキャンに失敗しました", err
 	}
-	return "無人監視スキャンはすでに実行待ちです（重複投入をスキップしました）", nil
+	if len(result.Stopped) == 0 {
+		return fmt.Sprintf("無人監視スキャン完了: 停止対象なし (running=%d)", result.RunningMaps), nil
+	}
+	return fmt.Sprintf("無人監視スキャン完了: 停止=%s", strings.Join(result.Stopped, ",")), nil
+}
+
+func (b *Bot) cmdConfigReload(ctx context.Context) (string, error) {
+	newCfg, err := LoadConfig(b.configPath)
+	if err != nil {
+		return "config再読み込みに失敗しました", err
+	}
+	newMapByID := newCfg.MapByID()
+
+	b.mu.Lock()
+	oldMapByID := make(map[string]MapConfig, len(b.mapByID))
+	for mapID, cfg := range b.mapByID {
+		oldMapByID[mapID] = cfg
+	}
+	b.mu.Unlock()
+
+	autoStopped := []string{}
+	for mapID, oldMap := range oldMapByID {
+		if _, ok := newMapByID[mapID]; ok {
+			continue
+		}
+		state, ierr := b.podman.InspectState(ctx, mapID)
+		if ierr != nil || !state.Running {
+			continue
+		}
+		if _, serr := b.cmdStop(ctx, mapID, true); serr == nil {
+			autoStopped = append(autoStopped, oldMap.DisplayName)
+		}
+	}
+
+	b.mu.Lock()
+	*b.cfg = *newCfg
+	b.mapByID = newMapByID
+	for _, m := range b.cfg.Maps {
+		if _, ok := b.mapLocks[m.MapID]; !ok {
+			b.mapLocks[m.MapID] = &sync.Mutex{}
+		}
+	}
+	for mapID := range b.mapLocks {
+		if _, ok := b.mapByID[mapID]; !ok {
+			delete(b.mapLocks, mapID)
+			delete(b.zeroSince, mapID)
+			delete(b.startedAt, mapID)
+			delete(b.nextLocalBackup, mapID)
+		}
+	}
+	b.mu.Unlock()
+
+	b.notify("サーバー設定が更新されました")
+
+	changed := []string{}
+	for mapID, oldMap := range oldMapByID {
+		newMap, ok := b.mapByID[mapID]
+		if !ok {
+			changed = append(changed, mapID+":removed")
+			continue
+		}
+		if oldMap.Port != newMap.Port || oldMap.SessionName != newMap.SessionName || oldMap.DisplayName != newMap.DisplayName {
+			changed = append(changed, mapID+":restart_required")
+		}
+	}
+	for mapID := range b.mapByID {
+		if _, ok := oldMapByID[mapID]; !ok {
+			changed = append(changed, mapID+":added")
+		}
+	}
+	sort.Strings(changed)
+
+	if len(changed) == 0 {
+		return "config再読み込み完了: 変更なし", nil
+	}
+	msg := "config再読み込み完了: " + strings.Join(changed, ", ")
+	if len(autoStopped) > 0 {
+		msg += " / removed mapを停止: " + strings.Join(autoStopped, ",")
+	}
+	return msg, nil
+}
+
+type scanResult struct {
+	Stopped     []string
+	RunningMaps int
 }
 
 func (b *Bot) cmdPlayers(ctx context.Context, mapID string) (string, error) {
@@ -524,33 +622,9 @@ func (b *Bot) cmdMaps(ctx context.Context) (string, error) {
 		if st.Running {
 			state = "起動中"
 		}
-		lines = append(lines, fmt.Sprintf("- %s (%s): %s", st.Map.DisplayName, st.Map.MapID, state))
+		lines = append(lines, fmt.Sprintf("- %s (`%s`): %s", st.Map.DisplayName, st.Map.MapID, state))
 	}
 	return "マップ一覧\n" + strings.Join(lines, "\n"), nil
-}
-
-func (b *Bot) cmdBroadcast(ctx context.Context, msg string) (string, error) {
-	status, _ := b.podman.CollectStatuses(ctx, b.cfg.Maps)
-	targets := []MapConfig{}
-	for _, st := range status {
-		if st.Running {
-			targets = append(targets, st.Map)
-		}
-	}
-	if len(targets) == 0 {
-		return "起動中マップがないため送信しませんでした", nil
-	}
-	failed := []string{}
-	for _, m := range targets {
-		err := b.broadcastLocked(ctx, m, msg)
-		if err != nil {
-			failed = append(failed, m.MapID)
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Sprintf("メッセージ送信に失敗しました（失敗: %s）", strings.Join(failed, ",")), nil
-	}
-	return fmt.Sprintf("起動中の全マップにメッセージを送信しました（対象: %dマップ）", len(targets)), nil
 }
 
 func (b *Bot) cmdStatus(ctx context.Context) (string, error) {
@@ -601,18 +675,24 @@ func (b *Bot) runScanWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case reason := <-b.scanQueue:
-			_ = b.scanIdleOnce(context.Background(), reason)
+			_, _ = b.scanIdleOnce(context.Background(), reason)
 		}
 	}
 }
 
-func (b *Bot) scanIdleOnce(ctx context.Context, reason string) error {
+func (b *Bot) scanIdleOnce(ctx context.Context, reason string) (scanResult, error) {
+	b.scanMu.Lock()
+	defer b.scanMu.Unlock()
+
+	b.log.Info("scanIdleOnce started: reason=%s", reason)
+
 	status, err := b.podman.CollectStatuses(ctx, b.cfg.Maps)
 	if err != nil {
 		b.log.Warn("scan status warning: %v", err)
 	}
 	now := time.Now()
 	stopped := []string{}
+	runningMaps := 0
 	for _, st := range status {
 		if !st.Running {
 			b.mu.Lock()
@@ -620,6 +700,7 @@ func (b *Bot) scanIdleOnce(ctx context.Context, reason string) error {
 			b.mu.Unlock()
 			continue
 		}
+		runningMaps++
 		lock := b.mapLock(st.Map.MapID)
 		lock.Lock()
 		players, perr := b.rcon.ListPlayers(ctx, st.Map)
@@ -641,7 +722,9 @@ func (b *Bot) scanIdleOnce(ctx context.Context, reason string) error {
 		if len(players) > 0 {
 			continue
 		}
-		if now.Sub(zeroAt) >= time.Duration(b.cfg.Runtime.IdleStopMinutes)*time.Minute {
+		shouldStop := reason == "manual" || now.Sub(zeroAt) >= time.Duration(b.cfg.Runtime.IdleStopMinutes)*time.Minute
+		b.log.Info("map=%s: players=0, reason=%s, zeroAt=%v, elapsed=%v, shouldStop=%v", st.Map.MapID, reason, zeroAt, now.Sub(zeroAt), shouldStop)
+		if shouldStop {
 			if _, err := b.cmdStop(ctx, st.Map.MapID, true); err == nil {
 				stopped = append(stopped, st.Map.DisplayName)
 			}
@@ -650,7 +733,7 @@ func (b *Bot) scanIdleOnce(ctx context.Context, reason string) error {
 	if len(stopped) > 0 {
 		b.notify(fmt.Sprintf("無人停止を実行しました (%s) reason=%s", strings.Join(stopped, ","), reason))
 	}
-	return nil
+	return scanResult{Stopped: stopped, RunningMaps: runningMaps}, nil
 }
 
 func (b *Bot) runSchedulers(ctx context.Context) {
@@ -700,7 +783,6 @@ func (b *Bot) runMinuteTasks(ctx context.Context) {
 	b.runLocalBackupScheduler(ctx, now)
 	b.runCloudBackupScheduler(ctx, now)
 	b.runAnnouncementScheduler(ctx, now)
-	b.runPreShutdownScheduler(ctx, now)
 }
 
 func (b *Bot) runLocalBackupScheduler(ctx context.Context, now time.Time) {
@@ -755,7 +837,7 @@ func (b *Bot) runCloudBackupScheduler(ctx context.Context, now time.Time) {
 	b.mu.Lock()
 	last := b.lastScheduleRun[key]
 	b.mu.Unlock()
-	if !now.After(target) || (!last.IsZero() && now.Sub(last) < time.Hour) {
+	if !sameClockMinute(now, target) || (!last.IsZero() && now.Sub(last) < time.Hour) {
 		return
 	}
 	fails := []string{}
@@ -806,51 +888,19 @@ func (b *Bot) runAnnouncementScheduler(ctx context.Context, now time.Time) {
 		b.mu.Lock()
 		last := b.lastScheduleRun[key]
 		b.mu.Unlock()
-		if !now.After(target) || (!last.IsZero() && now.Sub(last) < time.Hour) {
+		if !sameClockMinute(now, target) || (!last.IsZero() && now.Sub(last) < time.Hour) {
 			continue
 		}
 		targetMaps := b.runningMapsFiltered(ctx, item.IncludeMaps)
-		failed := []string{}
-		for _, m := range targetMaps {
-			if err := b.broadcastLocked(ctx, m, item.Message); err != nil {
-				failed = append(failed, m.MapID)
-			}
-		}
-		if len(failed) > 0 {
-			b.notify(fmt.Sprintf("自動メッセージ失敗 %s: %s", item.Name, strings.Join(failed, ",")))
+		if len(targetMaps) == 0 {
+			b.notify(fmt.Sprintf("[自動告知:%s] 対象マップなしのためスキップ", item.Name))
 		} else {
-			b.notify(fmt.Sprintf("自動メッセージ完了 %s (対象:%d)", item.Name, len(targetMaps)))
+			b.notify(fmt.Sprintf("[自動告知:%s] %s", item.Name, item.Message))
 		}
 		b.mu.Lock()
 		b.lastScheduleRun[key] = now
 		b.mu.Unlock()
 	}
-}
-
-func (b *Bot) runPreShutdownScheduler(ctx context.Context, now time.Time) {
-	if !b.cfg.PreShutdown.Enabled || b.cfg.PreShutdown.Action != "graceful_stop_all" || b.cfg.PreShutdown.Time == "" {
-		return
-	}
-	target, err := parseHHMM(b.cfg.PreShutdown.Time, now)
-	if err != nil {
-		return
-	}
-	key := "preshutdown:" + target.Format("20060102-1504")
-	b.mu.Lock()
-	last := b.lastScheduleRun[key]
-	b.mu.Unlock()
-	if !now.After(target) || (!last.IsZero() && now.Sub(last) < time.Hour) {
-		return
-	}
-	b.notify("pre_shutdown を開始します")
-	if err := b.gracefulStopAll(ctx, "pre_shutdown"); err != nil {
-		b.notify("pre_shutdown 失敗: " + err.Error())
-	} else {
-		b.notify("pre_shutdown 完了")
-	}
-	b.mu.Lock()
-	b.lastScheduleRun[key] = now
-	b.mu.Unlock()
 }
 
 func (b *Bot) runningMapsFiltered(ctx context.Context, include []string) []MapConfig {
@@ -872,21 +922,37 @@ func (b *Bot) runningMapsFiltered(ctx context.Context, include []string) []MapCo
 	return out
 }
 
-func (b *Bot) gracefulStopAll(ctx context.Context, reason string) error {
-	status, _ := b.podman.CollectStatuses(ctx, b.cfg.Maps)
-	failed := []string{}
+func (b *Bot) gracefulShutdown(ctx context.Context) error {
+	b.notify("Yo-Kan サーバー停止シーケンスを開始します")
+
+	status, err := b.podman.CollectStatuses(ctx, b.cfg.Maps)
+	if err != nil {
+		b.log.Warn("shutdown status収集エラー: %v", err)
+	}
+
+	errList := []error{}
+	stopped := []string{}
 	for _, st := range status {
 		if !st.Running {
 			continue
 		}
-		if _, err := b.cmdStop(ctx, st.Map.MapID, true); err != nil {
-			failed = append(failed, st.Map.MapID)
+		msg, stopErr := b.cmdStop(ctx, st.Map.MapID, true)
+		if stopErr != nil {
+			errList = append(errList, fmt.Errorf("%s: %w", st.Map.MapID, stopErr))
+			b.log.Warn("shutdown stop失敗: %s err=%v", st.Map.MapID, stopErr)
+			continue
 		}
+		b.log.Info("shutdown stop完了: %s (%s)", st.Map.MapID, msg)
+		stopped = append(stopped, st.Map.DisplayName)
 	}
-	if len(failed) > 0 {
-		return fmt.Errorf("%s 失敗: %s", reason, strings.Join(failed, ","))
+
+	if len(stopped) > 0 {
+		b.notify("停止シーケンス完了: " + strings.Join(stopped, ","))
+	} else {
+		b.notify("停止シーケンス完了: 起動中マップなし")
 	}
-	return nil
+
+	return errors.Join(errList...)
 }
 
 func (b *Bot) restoreRuntimeState(ctx context.Context) {

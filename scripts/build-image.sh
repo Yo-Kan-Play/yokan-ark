@@ -6,8 +6,8 @@ set -euo pipefail
 # Usage:
 #   ./scripts/build-image.sh                 # builds maps image (default tag)
 #   ./scripts/build-image.sh <TAG>           # builds maps image with TAG
-#   ./scripts/build-image.sh maps [TAG]
-#   ./scripts/build-image.sh bot  [TAG]
+#   ./scripts/build-image.sh maps yokan-ark-maps:latest
+#   ./scripts/build-image.sh bot yokan-ark-bot:latest
 
 TARGET="maps"
 TAG="yokan-ark-maps:latest"

@@ -17,12 +17,14 @@ discord:
 
 # --- Permissions ---
 permissions:
-  # Fallback rules (used when command-specific allow_user_ids is not provided)
+  # Fallback role rules (used only when command-specific rule is not defined)
   default:
     allow_role_ids:
       - 111111111111111111
 
   # Command-specific rules
+  # - If allow_user_ids contains one or more entries: only those users may execute
+  # - If allow_user_ids is an empty array: anyone may execute
   commands:
     start:
       allow_user_ids: [123456789012345678]
@@ -34,7 +36,7 @@ permissions:
       allow_user_ids: [123456789012345678]
     scan:
       allow_user_ids: [123456789012345678]
-    broadcast:
+    config-reload:
       allow_user_ids: [123456789012345678]
 
     # status / players / maps are often safe to open by role or everyone.
@@ -54,6 +56,7 @@ runtime:
   rcon_timeout_seconds: 5
   podman_timeout_seconds: 20
   presence_interval_seconds: 120
+  shutdown_timeout_seconds: 90
 
 # --- Podman control ---
 podman:
@@ -110,24 +113,15 @@ backup:
 announcements:
   enabled: true
   items:
-    - name: pre_shutdown_warning_10m
+    - name: daily_notice_1
       time: "01:50"
       weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-      message: "サーバーは10分後に停止します。作業中の人は安全な場所へ移動してください。"
+      message: "定期アナウンスです。必要に応じてセーブ・ログアウトをお願いします。"
       include_maps: []
-    - name: pre_shutdown_warning_1m
+    - name: daily_notice_2
       time: "01:59"
-      message: "サーバーはまもなく停止します。ログアウトしてください。"
+      message: "定期アナウンスです。"
       include_maps: []
-
-pre_shutdown:
-  enabled: true
-  time: "01:55"
-  action: graceful_stop_all
-
-shutdown_guard:
-  enabled: true
-  best_effort: true
 
     # R2 config is usually read from bot container env:
     # - R2_ENDPOINT

@@ -22,7 +22,7 @@ func main() {
 		fmt.Println("config ok")
 		return
 	}
-	bot, err := NewBot(cfg, logger)
+	bot, err := NewBot(cfg, *configPath, logger)
 	if err != nil {
 		logger.Error("Bot初期化失敗: %v", err)
 		os.Exit(1)

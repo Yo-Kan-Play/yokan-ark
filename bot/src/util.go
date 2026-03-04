@@ -51,6 +51,11 @@ func parseHHMM(hhmm string, base time.Time) (time.Time, error) {
 	return time.Date(base.Year(), base.Month(), base.Day(), t.Hour(), t.Minute(), 0, 0, loc), nil
 }
 
+func sameClockMinute(a, b time.Time) bool {
+	aa := a.In(b.Location())
+	return aa.Year() == b.Year() && aa.Month() == b.Month() && aa.Day() == b.Day() && aa.Hour() == b.Hour() && aa.Minute() == b.Minute()
+}
+
 func weekdayMatch(weekdays []string, t time.Time) bool {
 	if len(weekdays) == 0 {
 		return true
